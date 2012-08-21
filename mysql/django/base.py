@@ -28,6 +28,11 @@ from django.db.backends.mysql.introspection import DatabaseIntrospection
 from django.db.backends.mysql.validation import DatabaseValidation
 from django.utils.safestring import SafeString, SafeUnicode
 
+try:
+    from django.utils import timezone
+except ImportError, e:
+    raise ImproperlyConfigured('Django versions < 1.4 are not supported')
+
 # Raise exceptions for database warnings if DEBUG is on
 from django.conf import settings
 #if settings.DEBUG:
@@ -131,9 +136,11 @@ class DatabaseOperations(BaseDatabaseOperations):
             return None
 
         # MySQL doesn't support tz-aware datetimes
-        if value.tzinfo is not None:
-            raise ValueError("MySQL backend does not support timezone-aware datetimes.")
-
+        if timezone.is_aware(value):
+            if settings.USE_TZ:
+                value = value.astimezone(timezone.utc).replace(tzinfo=None)
+            else:
+                raise ValueError("MySQL backend does not support timezone-aware datetimes when USE_TZ is False.") 
         # MySQL doesn't support microseconds
         return unicode(value.replace(microsecond=0))
 
@@ -142,8 +149,8 @@ class DatabaseOperations(BaseDatabaseOperations):
             return None
 
         # MySQL doesn't support tz-aware datetimes
-        if value.tzinfo is not None:
-            raise ValueError("MySQL backend does not support timezone-aware datetimes.")
+        if timezone.is_aware(value):
+            raise ValueError("MySQL backend does not support timezone-aware times.")
 
         # MySQL doesn't support microseconds
         return unicode(value.replace(microsecond=0))
@@ -179,7 +186,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
 
         self.server_version = None
         self.features = DatabaseFeatures(self)
-        self.ops = DatabaseOperations()
+        self.ops = DatabaseOperations(self)
         self.client = DatabaseClient(self)
         self.creation = DatabaseCreation(self)
         self.introspection = DatabaseIntrospection(self)
@@ -198,7 +205,7 @@ class DatabaseWrapper(BaseDatabaseWrapper):
     def _cursor(self):
         if not self._valid_connection():
             kwargs = {
-                #'conv': django_conversions,
+                'conv': django_conversions,
                 'charset': 'utf8',
                 'use_unicode': True,
             }
